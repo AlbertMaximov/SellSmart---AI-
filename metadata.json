@@ -1,0 +1,8 @@
+{
+  "name": "SellSmart - AI Аукцион",
+  "description": "Приложение для быстрой продажи вещей с помощью ИИ: анализ фото, оценка цены и генерация объявлений.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  sellsmart:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Передаем переменные для Vite на этапе сборки образа (build-time)
+        - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+        - APP_URL=${APP_URL:-}
+    container_name: sellsmart-app
+    ports:
+      # Пробрасываем порт контейнера наружу
+      - "3000:3000"
+    environment:
+      # Переменные на этапе выполнения (run-time)
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - APP_URL=${APP_URL:-}
+    env_file:
+      - .env # Загрузка переменных из .env файла локально (если существует)
+    restart: unless-stopped
