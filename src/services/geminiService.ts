@@ -14,20 +14,33 @@ export interface AnalysisResult {
 }
 
 export const analyzeItem = async (imageData: string, isUrl: boolean = false): Promise<AnalysisResult> => {
-  const response = await fetch("/api/analyze-item", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ imageData, isUrl }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds timeout
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.error || `Failed to analyze item (HTTP ${response.status})`);
+  try {
+    const response = await fetch("/api/analyze-item", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ imageData, isUrl }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Failed to analyze item (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error("Анализ занял слишком много времени. Попробуйте снова или используйте описание текстом.");
+    }
+    throw err;
   }
-
-  return response.json();
 };
 
 export const chatWithAI = async (message: string, context?: AnalysisResult): Promise<string> => {

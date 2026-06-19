@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import OpenAI from "openai";
 import dotenv from "dotenv";
 
 // Load local environment variables if available
@@ -14,212 +14,102 @@ const PORT = 3000;
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
-// Initialize the backend Gemini client with high-quality settings
-const apiKey = process.env.GEMINI_API_KEY || "";
-const ai = new GoogleGenAI({
+// Initialize the backend DeepSeek client
+const apiKey = process.env.DEEPSEEK_API_KEY || "";
+const client = new OpenAI({
   apiKey: apiKey,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
+  baseURL: "https://api.deepseek.com",
 });
-
-// Configure models from env vars or reasonable defaults
-const VISION_MODEL = process.env.VISION_MODEL || "gemini-3.5-flash";
-const TEXT_MODEL = process.env.MODEL_NAME || "gemini-3.5-flash";
-const TTS_MODEL = "gemini-3.1-flash-tts-preview";
-
-// Helper to sanitize potential markdown JSON wrapper
-function sanitizeJsonString(raw: string): string {
-  return raw.replace(/```json\s?/gi, "").replace(/```/g, "").trim();
-}
 
 // API Route: Analyze item photograph/source URL
 app.post("/api/analyze-item", async (req, res) => {
   try {
     const { imageData, isUrl } = req.body;
-    if (!imageData) {
-      return res.status(400).json({ error: "Missing imageData in request body" });
-    }
-
+    
     if (!apiKey) {
-      return res.status(500).json({ error: "GEMINI_API_KEY is not defined on the server." });
+      return res.status(500).json({ error: "DEEPSEEK_API_KEY is not defined on the server." });
     }
 
-    const prompt = `Проанализируй это изображение товара для продажи. 
+    // NOTE: DeepSeek API (like standard LLMs) generally does not support direct image processing.
+    // We will provide a textual description that an image was provided.
+    const prompt = `Проанализируй этот товар для продажи. 
+${isUrl ? `Ссылка на изображение: ${imageData}` : "Изображение было предоставлено пользователем, но DeepSeek API не поддерживает прямой анализ изображений. Оцени товар на основе типичного описания предмета или предположи тип предмета, если возможно."}
+
 Определи категорию (электроника, одежда, мебель, бытовая техника, аксессуары, другое), бренд, модель, цвет и состояние (новый, почти новый, хорошее состояние, есть следы использования, требуется ремонт).
 Оцени рыночные цены в рублях (минимум, средняя, рекомендованная).
 Сгенерируй привлекательный заголовок и подробное описание для объявления.
-Верни результат строго в формате JSON.`;
 
-    const part = isUrl 
-      ? { text: `${prompt} Ссылка на изображение: ${imageData}` }
-      : {
-          inlineData: {
-            mimeType: "image/jpeg",
-            data: imageData.split(",")[1] || imageData,
-          },
-        };
+Верни результат строго в формате JSON, без дополнительного текста.
+Пример формата:
+{
+  "category": "...", "brand": "...", "model": "...", "condition": "...", "color": "...", 
+  "minPrice": 0, "avgPrice": 0, "recommendedPrice": 0, 
+  "title": "...", "description": "...", 
+  "characteristics": {"Бренд": "...", "Модель": "...", "Цвет": "...", "Состояние": "..."}, 
+  "confidence": 0.5
+}`;
 
-    const response = await ai.models.generateContent({
-      model: VISION_MODEL,
-      contents: isUrl ? [{ parts: [part] }] : { parts: [part, { text: prompt }] },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            category: { type: Type.STRING },
-            brand: { type: Type.STRING },
-            model: { type: Type.STRING },
-            condition: { type: Type.STRING },
-            color: { type: Type.STRING },
-            minPrice: { type: Type.NUMBER },
-            avgPrice: { type: Type.NUMBER },
-            recommendedPrice: { type: Type.NUMBER },
-            title: { type: Type.STRING },
-            description: { type: Type.STRING },
-            characteristics: { 
-              type: Type.OBJECT,
-              properties: {
-                "Бренд": { type: Type.STRING },
-                "Модель": { type: Type.STRING },
-                "Цвет": { type: Type.STRING },
-                "Состояние": { type: Type.STRING }
-              }
-            },
-            confidence: { type: Type.NUMBER, description: "Уверенность в определении товара от 0 до 1" }
-          },
-          required: ["category", "brand", "model", "condition", "minPrice", "avgPrice", "recommendedPrice", "title", "description", "characteristics", "confidence"]
-        }
-      }
+    const completion = await client.chat.completions.create({
+      model: "deepseek-chat",
+      messages: [
+        { role: "system", content: "Ты — эксперт по оценке товаров. Отвечай только в формате JSON." },
+        { role: "user", content: prompt }
+      ],
+      response_format: { type: "json_object" }
     });
 
-    const parsedData = JSON.parse(sanitizeJsonString(response.text || "{}"));
+    const parsedData = JSON.parse(completion.choices[0].message.content || "{}");
     res.json(parsedData);
   } catch (err: any) {
     console.error("Error in /api/analyze-item:", err);
-    res.status(500).json({ error: err.message || "An unexpected error occurred during item analysis" });
+    res.status(500).json({ error: err.message || "An unexpected error occurred" });
   }
 });
 
-// API Route: Casual/Expert Chat assistant for SellSmart
+// API Route: Casual/Expert Chat assistant
 app.post("/api/chat-with-ai", async (req, res) => {
   try {
     const { message, context } = req.body;
-    if (!message) {
-      return res.status(400).json({ error: "Missing message in request body" });
-    }
-
-    if (!apiKey) {
-      return res.status(500).json({ error: "GEMINI_API_KEY is not defined on the server." });
-    }
-
-    const systemInstruction = `Ты - помощник SellSmart, эксперт по онлайн-продажам. 
-Твоя цель - помочь пользователю выгодно и быстро продать товар. 
-Отвечай на русском языке. Будь вежливым и профессиональным.
-${context ? `Контекст текущего товара: ${JSON.stringify(context)}` : ""}`;
-
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [{ parts: [{ text: message }] }],
-      config: { systemInstruction }
+    
+    const response = await client.chat.completions.create({
+      model: "deepseek-chat",
+      messages: [
+        { role: "system", content: `Ты - помощник SellSmart, эксперт по онлайн-продажам. ${context ? `Контекст товара: ${JSON.stringify(context)}` : ""}` },
+        { role: "user", content: message }
+      ]
     });
 
-    res.json({ text: response.text || "Извините, я не получил ответ от ИИ." });
+    res.json({ text: response.choices[0].message.content || "Извините, я не получил ответ." });
   } catch (err: any) {
-    console.error("Error in /api/chat-with-ai:", err);
-    res.status(500).json({ error: err.message || "An error occurred during chat reasoning" });
+    res.status(500).json({ error: err.message || "An error occurred" });
   }
 });
 
-// API Route: Text To Speech vocalization
+// TTS is not supported by DeepSeek/OpenAI standard API.
 app.post("/api/speak-text", async (req, res) => {
-  try {
-    const { text } = req.body;
-    if (!text) {
-      return res.status(400).json({ error: "Missing text to speak" });
-    }
-
-    if (!apiKey) {
-      return res.status(500).json({ error: "GEMINI_API_KEY is not defined on the server." });
-    }
-
-    let base64Audio: string | null = null;
-
-    try {
-      const response = await ai.models.generateContent({
-        model: TTS_MODEL,
-        contents: [{ parts: [{ text: `Скажи это дружелюбно: ${text}` }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
-            },
-          },
-        },
-      });
-      base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-    } catch (ttsErr: any) {
-      console.warn("Primary TTS model failed. Retrying with backup format/model...", ttsErr);
-      // Fallback to legacy format/model if needed
-      try {
-        const responseBackup = await ai.models.generateContent({
-          model: "gemini-2.5-flash-preview-tts",
-          contents: [{ parts: [{ text: `Скажи это дружелюбно: ${text}` }] }],
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: 'Kore' },
-              },
-            },
-          },
-        });
-        base64Audio = responseBackup.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-      } catch (backupErr: any) {
-        console.error("Backup TTS also failed:", backupErr);
-      }
-    }
-
-    res.json({ audioBase64: base64Audio });
-  } catch (err: any) {
-    console.error("Error in /api/speak-text:", err);
-    res.status(500).json({ error: err.message || "Synthesizing vocal speech failed" });
-  }
+  res.status(501).json({ error: "TTS is not supported by the current AI provider." });
 });
 
-// API Route: Rewrites the seller listing to short/impactful or long/persuasive form
+// API Route: Rewrites the seller listing
 app.post("/api/rewrite-text", async (req, res) => {
   try {
     const { text, style } = req.body;
-    if (!text || !style) {
-      return res.status(400).json({ error: "Missing text or style parameters" });
-    }
-
-    if (!apiKey) {
-      return res.status(500).json({ error: "GEMINI_API_KEY is not defined on the server." });
-    }
-
     const prompt = style === 'short' 
-      ? `Перепиши это объявление, сделав его максимально коротким и лаконичным, сохранив суть: ${text}`
-      : `Перепиши это объявление, сделав его более продающим, эмоциональным и привлекательным для покупателя: ${text}`;
+      ? `Перепиши это объявление, сделав его максимально коротким и лаконичным: ${text}`
+      : `Перепиши это объявление, сделав его более продающим: ${text}`;
 
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [{ parts: [{ text: prompt }] }],
+    const response = await client.chat.completions.create({
+      model: "deepseek-chat",
+      messages: [{ role: "user", content: prompt }]
     });
 
-    res.json({ text: response.text || text });
+    res.json({ text: response.choices[0].message.content || text });
   } catch (err: any) {
-    console.error("Error in /api/rewrite-text:", err);
-    res.status(500).json({ error: err.message || "Rewriting listing text failed" });
+    res.status(500).json({ error: err.message || "Rewriting failed" });
   }
 });
 
-// Setup Vite Dev Middleware / production static folder
+// ... (keep Vite middleware as before)
 async function initializeServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -227,18 +117,16 @@ async function initializeServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
-    console.log("Vite Development server configured.");
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
-    console.log("Production static files server configured.");
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`SellSmart Service online. Hosting entrypoint on port ${PORT}`);
+    console.log(`SellSmart Service online on port ${PORT}`);
   });
 }
 

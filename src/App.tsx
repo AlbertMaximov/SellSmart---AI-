@@ -391,7 +391,7 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Settings className="w-5 h-5 text-slate-400" />
-                  <h3 className="font-bold text-slate-800">Настройки продажи</h3>
+                  <h3 className="font-bold text-slate-800">Параметры продажи</h3>
                 </div>
               </div>
               
@@ -406,13 +406,13 @@ export default function App() {
                   onClick={() => setFilters(f => ({ ...f, maxPrice: !f.maxPrice }))}
                   className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${filters.maxPrice ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                 >
-                  Макс. цена
+                  Максимальная цена
                 </button>
                 <button 
                   onClick={() => setFilters(f => ({ ...f, local: !f.local }))}
                   className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${filters.local ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                 >
-                  Локально
+                  Самовывоз/Локально
                 </button>
                 {customParams.map((p, i) => (
                   <span key={i} className="px-4 py-2 rounded-full text-sm font-medium bg-blue-50 text-blue-600 flex items-center gap-2">
@@ -425,7 +425,7 @@ export default function App() {
                   className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-400 border border-dashed border-slate-300 hover:bg-slate-200 flex items-center gap-1"
                 >
                   <Plus className="w-4 h-4" />
-                  Параметр
+                  Добавить параметр
                 </button>
               </div>
 
@@ -504,14 +504,14 @@ export default function App() {
                     onClick={() => handleRewrite('short')}
                     className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all disabled:opacity-50"
                   >
-                    Короче
+                    Сделать короче
                   </button>
                   <button 
                     disabled={isRewriting}
                     onClick={() => handleRewrite('selling')}
                     className="flex-1 py-4 bg-emerald-50 text-emerald-600 rounded-2xl font-bold border border-emerald-100 hover:bg-emerald-100 transition-all disabled:opacity-50"
                   >
-                    Продающее
+                    Сделать продающим
                   </button>
                 </div>
               </div>
